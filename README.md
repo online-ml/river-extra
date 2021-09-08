@@ -30,6 +30,15 @@ from river_extra import cluster
 
 At the moment there isn't any. We encourage you to dive into the codebase.
 
+## Development
+
+```sh
+git clone river[extra]
+cd river_extra
+poetry install
+poetry shell
+```
+
 ## License
 
 River is free and open-source software licensed under the [3-clause BSD license](https://github.com/online-ml/river/blob/master/LICENSE). The same is true for this repository.
