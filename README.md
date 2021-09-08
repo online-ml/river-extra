@@ -7,6 +7,12 @@ This package contains additional estimators that have not been put into the main
 ## Installation
 
 ```sh
+pip install river[extra]
+```
+
+You can also install from source:
+
+```sh
 pip install git+https://github.com/online-ml/river-extra
 ```
 
@@ -33,7 +39,7 @@ At the moment there isn't any. We encourage you to dive into the codebase.
 ## Development
 
 ```sh
-git clone river[extra]
+git clone https://github.com/online-ml/river_extra
 cd river_extra
 poetry install
 poetry shell
