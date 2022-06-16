@@ -14,7 +14,7 @@ from river import base
 __all__ = ["PyTorch2RiverBase", "PyTorch2RiverRegressor", "PyTorch2RiverClassifier"]
 
 
-class PyTorch2RiverBase(base.Estimator):
+class PyTorch2RiverBase(base.Estimator, base.MultiOutputMixin):
     """An estimator that integrates neural Networks from PyTorch."""
 
     def __init__(
