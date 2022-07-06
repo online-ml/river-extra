@@ -228,6 +228,7 @@ class SSPT(base.Estimator):
 
         # We need to start the optimization process from scratch
         if self.drift_detector.drift_detected:
+            self._n = 0
             self._converged = False
             self._simplex = self._create_simplex(self._best_model)
 
@@ -274,6 +275,8 @@ class SSPT(base.Estimator):
             self._learn_converged(x, y)
         else:
             self._learn_not_converged(x, y)
+        
+        return self
 
     @property
     def best_model(self):
@@ -287,6 +290,55 @@ class SSPT(base.Estimator):
     @property
     def converged(self):
         return self._converged
+
+
+
+class SSPTClassifier(SSPT, base.Classifier):
+    """Single-pass Self Parameter Tuning Regressor.
+    
+    Parameters
+    ----------
+    model
+    metric
+    params_range
+    grace_period
+    drift_detector
+    start
+    convergence_sphere
+    seed
+
+    References
+    ----------
+    [1]: Veloso, B., Gama, J., Malheiro, B., & Vinagre, J. (2021).Hyperparameter self-tuning
+    for data streams. Information Fusion, 76, 75-86.
+    """
+    def __init__(
+        self,
+        model: base.Classifier,
+        metric: metrics.base.ClassificationMetric,
+        params_range: typing.Dict[str, typing.Tuple],
+        grace_period: int = 500,
+        drift_detector: base.DriftDetector = drift.ADWIN(),
+        start: str = "warm",
+        convergence_sphere: float = 0.0001,
+        seed: int = None,
+    ):
+        super().__init__(
+            model,
+            metric,
+            params_range,
+            grace_period,
+            drift_detector,
+            start,
+            convergence_sphere,
+            seed,
+        )
+
+    def _drift_input(self, y_true, y_pred):
+        return 0 if y_true == y_pred else 1
+
+    def predict_proba_one(self, x: dict):
+        return self.best_model.predict_proba_one(x)
 
 
 class SSPTRegressor(SSPT, base.Regressor):
