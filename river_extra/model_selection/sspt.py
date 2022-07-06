@@ -1,5 +1,6 @@
 import abc
 import collections
+import copy
 import math
 import random
 import typing
@@ -11,20 +12,23 @@ ModelWrapper = collections.namedtuple("ModelWrapper", "model metric")
 
 # TODO: change class inheritance
 class SSPT(base.Estimator):
+    """Single-pass Self Parameter Tuning"""
+
     _START_RANDOM = "random"
     _START_WARM = "warm"
 
     def __init__(
         self,
         model,
-        metric: metrics.base.Metric,
+        metric,
         params_range: typing.Dict[str, typing.Tuple],
-        grace_period: int = 500,
-        drift_detector: base.DriftDetector = drift.ADWIN(),
-        start: str = "warm",
-        convergence_sphere: float = 0.01,
-        seed: int = None,
+        grace_period: int,
+        drift_detector: base.DriftDetector,
+        start: str,
+        convergence_sphere: float,
+        seed: int,
     ):
+        super().__init__()
         self.model = model
         self.metric = metric
         self.params_range = params_range
@@ -41,15 +45,15 @@ class SSPT(base.Estimator):
 
         self.seed = seed
 
+        self._n = 0
+        self._converged = False
+        self._rng = random.Random(self.seed)
+
         self._best_model = None
         self._simplex = self._create_simplex(model)
 
         # Models expanded from the simplex
         self._expanded: typing.Optional[typing.Dict] = None
-
-        self._n = 0
-        self._converged = False
-        self._rng = random.Random(self.seed)
 
     def _random_config(self):
         config = {}
@@ -112,15 +116,19 @@ class SSPT(base.Estimator):
                 new_config[p_name] = round(new_val, 0) if p_type == int else new_val
 
             # Modify the current best contender with the new hyperparameter values
-            return ModelWrapper(
-                self._simplex[0].mutate(new_config), self.metric.clone()
+            new = ModelWrapper(
+                copy.deepcopy(self._simplex[0].model), self.metric.clone()
             )
+            new.model.mutate(new_config)
+
+            return new
 
         expanded = {}
         # Midpoint between 'best' and 'good'
         expanded["midpoint"] = apply_operator(
             self._simplex[0], self._simplex[1], lambda h1, h2: (h1 + h2) / 2
         )
+
         # Reflection of 'midpoint' towards 'worst'
         expanded["reflection"] = apply_operator(
             expanded["midpoint"], self._simplex[2], lambda h1, h2: 2 * h1 - h2
@@ -169,31 +177,36 @@ class SSPT(base.Estimator):
                     m = self._expanded["midpoint"].metric
                     if m.is_better_than(g):
                         self._simplex[1] = self._expanded["midpoint"]
+        
+        self._sort_simplex()
 
     @property
     def _models_converged(self) -> bool:
-        # 1. Simplex in sphere
-
+        # 1. Simplex in spher
         params_b = self._simplex[0].model._get_params()
         params_g = self._simplex[1].model._get_params()
         params_w = self._simplex[2].model._get_params()
 
-        # Normalize params to ensure the contribute equally to the stopping criterion
+        scaled_params_b = {}
+        scaled_params_g = {}
+        scaled_params_w = {}
+
+        # Normalize params to ensure they contribute equally to the stopping criterion
         for p_name, (_, p_range) in self.params_range.items():
             scale = p_range[1] - p_range[0]
-            params_b[p_name] = (params_b[p_name] - p_range[0]) / scale
-            params_g[p_name] = (params_g[p_name] - p_range[0]) / scale
-            params_w[p_name] = (params_w[p_name] - p_range[0]) / scale
+            scaled_params_b[p_name] = (params_b[p_name] - p_range[0]) / scale
+            scaled_params_g[p_name] = (params_g[p_name] - p_range[0]) / scale
+            scaled_params_w[p_name] = (params_w[p_name] - p_range[0]) / scale
 
         max_dist = max(
             [
-                utils.math.minkowski_distance(params_b, params_g, p=2),
-                utils.math.minkowski_distance(params_b, params_w, p=2),
-                utils.math.minkowski_distance(params_g, params_w, p=2),
+                utils.math.minkowski_distance(scaled_params_b, scaled_params_g, p=2),
+                utils.math.minkowski_distance(scaled_params_b, scaled_params_w, p=2),
+                utils.math.minkowski_distance(scaled_params_g, scaled_params_w, p=2),
             ]
         )
 
-        ndim = len(params_b)
+        ndim = len(self.params_range)
         r_sphere = max_dist * math.sqrt((ndim / (2 * (ndim + 1))))
 
         if r_sphere < self.convergence_sphere:
@@ -229,6 +242,9 @@ class SSPT(base.Estimator):
             y_pred = wrap.model.predict_one(x)
             wrap.metric.update(y, y_pred)
             wrap.model.learn_one(x, y)
+        
+        # Keep the simplex ordered
+        self._sort_simplex()
 
         if not self._expanded:
             self._expanded = self._nelder_mead_expansion()
@@ -241,7 +257,6 @@ class SSPT(base.Estimator):
         if self._n == self.grace_period:
             self._n = 0
 
-            self._sort_simplex()
             # Update the simplex models using Nelder-Mead heuristics
             self._nelder_mead_operators()
 
@@ -272,3 +287,76 @@ class SSPT(base.Estimator):
     @property
     def converged(self):
         return self._converged
+
+
+class SSPTRegressor(SSPT, base.Regressor):
+    """Single-pass Self Parameter Tuning Regressor.
+    
+    Parameters
+    ----------
+    model
+    metric
+    params_range
+    grace_period
+    drift_detector
+    start
+    convergence_sphere
+    seed
+
+    Examples
+    --------
+    >>> from river import datasets
+    >>> from river import linear_model
+    >>> from river import metrics
+    >>> from river import preprocessing
+    >>> from river_extra import model_selection
+
+    >>> dataset = datasets.synth.Friedman(seed=42).take(2000)
+    >>> reg = preprocessing.StandardScaler() | model_selection.SSPTRegressor(
+        model=linear_model.LinearRegressor(),
+        metric=metrics.RMSE(),
+        params_range={
+            "l2": (float, (0.0, 0.5))
+        }
+    )
+    >>> metric = metrics.RMSE()
+
+    >>> for x, y in dataset:
+    ...     y_pred = reg.predict_one(x)
+    ...     metric.update(y, y_pred)
+    ...     reg.learn_one(x, y)
+
+    >>> metric
+
+    References
+    ----------
+    [1]: Veloso, B., Gama, J., Malheiro, B., & Vinagre, J. (2021).Hyperparameter self-tuning
+    for data streams. Information Fusion, 76, 75-86.
+    """
+    def __init__(
+        self,
+        model: base.Regressor,
+        metric: metrics.base.RegressionMetric,
+        params_range: typing.Dict[str, typing.Tuple],
+        grace_period: int = 500,
+        drift_detector: base.DriftDetector = drift.ADWIN(),
+        start: str = "warm",
+        convergence_sphere: float = 0.0001,
+        seed: int = None,
+    ):
+        super().__init__(
+            model,
+            metric,
+            params_range,
+            grace_period,
+            drift_detector,
+            start,
+            convergence_sphere,
+            seed,
+        )
+
+    def _drift_input(self, y_true, y_pred):
+        return abs(y_true - y_pred)
+
+    def predict_one(self, x: dict):
+        return self.best_model.predict_one(x)
