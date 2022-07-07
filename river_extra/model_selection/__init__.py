@@ -1,3 +1,3 @@
-from .sspt import SSPTClassifier, SSPTRegressor
+from .sspt import SSPT
 
-__all__ = ["SSPTClassifier", "SSPTRegressor"]
+__all__ = ["SSPT"]

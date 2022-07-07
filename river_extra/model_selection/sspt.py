@@ -1,14 +1,14 @@
-import abc
 import collections
 import copy
+import functools
 import math
 import random
-import types
 import typing
 
-from river import base, drift, metrics, utils
+# TODO use lazy imports where needed
+from river import anomaly, base, compose, drift, metrics, utils
 
-ModelWrapper = collections.namedtuple("ModelWrapper", "model metric")
+ModelWrapper = collections.namedtuple("ModelWrapper", "estimator metric")
 
 
 class SSPT(base.Estimator):
@@ -19,19 +19,21 @@ class SSPT(base.Estimator):
 
     def __init__(
         self,
-        model,
-        metric,
+        estimator: base.Estimator,
+        metric: metrics.base.Metric,
         params_range: typing.Dict[str, typing.Tuple],
-        grace_period: int,
-        drift_detector: base.DriftDetector,
-        start: str,
-        convergence_sphere: float,
-        seed: int,
+        drift_input: typing.Callable[[float, float], float],
+        grace_period: int = 500,
+        drift_detector: base.DriftDetector = drift.ADWIN(),
+        start: str = "warm",
+        convergence_sphere: float = 0.001,
+        seed: int = None,
     ):
         super().__init__()
-        self.model = model
+        self.estimator = estimator
         self.metric = metric
         self.params_range = params_range
+        self.drift_input = drift_input
 
         self.grace_period = grace_period
         self.drift_detector = drift_detector
@@ -49,39 +51,54 @@ class SSPT(base.Estimator):
         self._converged = False
         self._rng = random.Random(self.seed)
 
-        self._best_model = None
-        self._simplex = self._create_simplex(model)
+        self._best_estimator = None
+        self._simplex = self._create_simplex(estimator)
 
         # Models expanded from the simplex
         self._expanded: typing.Optional[typing.Dict] = None
 
         # Meta-programming
-        self._bind_output_method()
+        border = self.estimator
+        if isinstance(border, compose.Pipeline):
+            border = border[-1]
 
-    def _bind_output_method(self):
-        pass
-
+        if isinstance(border, (base.Classifier, base.Regressor)):
+            self._scorer_name = "predict_one"
+        elif isinstance(border, anomaly.base.AnomalyDetector):
+            self._scorer_name = "score_one"
+        elif isinstance(border, anomaly.base.AnomalyDetector):
+            self._scorer_name = "classify"
 
     def _random_config(self):
-        def gen_random(p_info):
-            if isinstance(p_info[-1], dict):
-                new_vals = {}
-                sub_class, sub_params = p_info
-                for p_name in sub_params:
-                    new_vals[p_name] = gen_random(sub_params[p_name])
-                return sub_class(**new_vals)
-            else:
-                p_type, p_range = p_info
+        def gen_random(p_data, e_data):
+            # Sub-component needs to be instantiated
+            if isinstance(e_data, tuple):
+                sub_class, sub_data = e_data
+                sub_config = {}
+
+                for sub_param, sub_info in p_data.items():
+                    sub_config[sub_param] = gen_random(sub_info, sub_data[sub_param])
+                return sub_class(**sub_config)
+
+            # We reached the numeric parameters
+            if isinstance(p_data, tuple):
+                p_type, p_range = p_data
                 if p_type == int:
                     return self._rng.randint(p_range[0], p_range[1])
                 elif p_type == float:
                     return self._rng.uniform(p_range[0], p_range[1])
 
-        config = {}
-        for p_name, p_info in self.params_range.items():
-            config[p_name] = gen_random(p_info)
+            # The sub-parameters need to be expanded
+            config = {}
+            for p_name, p_info in p_data.items():
+                e_info = e_data[p_name]
+                sub_config = {}
+                for sub_name, sub_info in p_info.items():
+                    sub_config[sub_name] = gen_random(sub_info, e_info[sub_name])
+                config[p_name] = sub_config
+            return config
 
-        return config
+        return gen_random(self.params_range, self.estimator._get_params())
 
     def _create_simplex(self, model) -> typing.List:
         # The simplex is divided in:
@@ -91,16 +108,16 @@ class SSPT(base.Estimator):
         simplex = [None] * 3
 
         simplex[0] = ModelWrapper(
-            self.model.clone(self._random_config()), self.metric.clone()
+            self.estimator.clone(self._random_config()), self.metric.clone()
         )
         simplex[2] = ModelWrapper(
-            self.model.clone(self._random_config()), self.metric.clone()
+            self.estimator.clone(self._random_config()), self.metric.clone()
         )
 
         if self.start == self._START_RANDOM:
             # The intermediate 'good' model is defined randomly
             simplex[1] = ModelWrapper(
-                self.model.clone(self._random_config()), self.metric.clone()
+                self.estimator.clone(self._random_config()), self.metric.clone()
             )
         elif self.start == self._START_WARM:
             # The intermediate 'good' model is defined randomly
@@ -115,23 +132,21 @@ class SSPT(base.Estimator):
         else:
             self._simplex.sort(key=lambda mw: mw.metric.get())
 
-    def _nelder_mead_expansion(self) -> typing.Dict:
-        """Create expanded models given the simplex models."""
+    def _gen_new_estimator(self, e1, e2, func):
+        """Generate new configuration given two estimators and a combination function."""
 
-        def apply_operator(param1, param2, func, p_info):
-            if isinstance(p_info[1], dict):
+        def apply_operator(param1, param2, p_info, func):
+            if isinstance(param1, tuple):
                 sub_class, sub_params1 = param1
                 _, sub_params2 = param2
-                sub_info = p_info[1]
-                new_params = {}
-                for sp_name in sub_params1:
-                    sp_info = sub_info[sp_name]
-                    # Recursive call to deal with nested hiperparameters
-                    new_params[sp_name] = apply_operator(
-                        sub_params1[sp_name], sub_params2[sp_name], func, sp_info
+
+                sub_config = {}
+                for sub_param, sub_info in p_info.items():
+                    sub_config[sub_param] = apply_operator(
+                        sub_params1[sub_param], sub_params2[sub_param], sub_info, func
                     )
-                return sub_class(**new_params)
-            else:
+                return sub_class(**sub_config)
+            if isinstance(p_info, tuple):
                 p_type, p_range = p_info
                 new_val = func(param1, param2)
 
@@ -142,46 +157,57 @@ class SSPT(base.Estimator):
                     new_val = p_range[1]
 
                 new_val = round(new_val, 0) if p_type == int else new_val
-
                 return new_val
 
-        def gen_new(m1, m2, func):
-            new_config = {}
-            m1_params = m1.model._get_params()
-            m2_params = m2.model._get_params()
+            # The sub-parameters need to be expanded
+            config = {}
+            for p_name, inner_p_info in p_info.items():
+                sub_param1 = param1[p_name]
+                sub_param2 = param2[p_name]
 
-            for p_name, p_info in self.params_range.items():
-                new_config[p_name] = apply_operator(
-                    m1_params[p_name], m2_params[p_name], func, p_info
-                )
+                sub_config = {}
+                for sub_name, sub_info in inner_p_info.items():
+                    sub_config[sub_name] = apply_operator(
+                        sub_param1[sub_name], sub_param2[sub_name], sub_info, func
+                    )
+                config[p_name] = sub_config
+            return config
 
-            # Modify the current best contender with the new hyperparameter values
-            new = ModelWrapper(
-                copy.deepcopy(self._simplex[0].model), self.metric.clone()
-            )
+        e1_params = e1.estimator._get_params()
+        e2_params = e2.estimator._get_params()
 
-            return new
+        new_config = apply_operator(e1_params, e2_params, self.params_range, func)
+        # Modify the current best contender with the new hyperparameter values
+        new = ModelWrapper(
+            copy.deepcopy(self._simplex[0].estimator), self.metric.clone()
+        )
+        new.estimator.mutate(new_config)
+
+        return new
+
+    def _nelder_mead_expansion(self) -> typing.Dict:
+        """Create expanded models given the simplex models."""
 
         expanded = {}
         # Midpoint between 'best' and 'good'
-        expanded["midpoint"] = gen_new(
+        expanded["midpoint"] = self._gen_new_estimator(
             self._simplex[0], self._simplex[1], lambda h1, h2: (h1 + h2) / 2
         )
 
         # Reflection of 'midpoint' towards 'worst'
-        expanded["reflection"] = gen_new(
+        expanded["reflection"] = self._gen_new_estimator(
             expanded["midpoint"], self._simplex[2], lambda h1, h2: 2 * h1 - h2
         )
         # Expand the 'reflection' point
-        expanded["expansion"] = gen_new(
+        expanded["expansion"] = self._gen_new_estimator(
             expanded["reflection"], expanded["midpoint"], lambda h1, h2: 2 * h1 - h2
         )
         # Shrink 'best' and 'worst'
-        expanded["shrink"] = gen_new(
+        expanded["shrink"] = self._gen_new_estimator(
             self._simplex[0], self._simplex[2], lambda h1, h2: (h1 + h2) / 2
         )
         # Contraction of 'midpoint' and 'worst'
-        expanded["contraction"] = gen_new(
+        expanded["contraction"] = self._gen_new_estimator(
             expanded["midpoint"], self._simplex[2], lambda h1, h2: (h1 + h2) / 2
         )
 
@@ -223,30 +249,38 @@ class SSPT(base.Estimator):
     def _models_converged(self) -> bool:
         # Normalize params to ensure they contribute equally to the stopping criterion
         def normalize_flattened_hyperspace(scaled, orig, info, prefix=""):
+            if isinstance(orig, tuple):
+                _, sub_orig = orig
+                for sub_param, sub_info in info.items():
+                    prefix_ = prefix + "__" + sub_param
+                    normalize_flattened_hyperspace(
+                        scaled, sub_orig[sub_param], sub_info, prefix_
+                    )
+                return
+
+            if isinstance(info, tuple):
+                _, p_range = info
+                interval = p_range[1] - p_range[0]
+                scaled[prefix] = (orig - p_range[0]) / interval
+                return
+
             for p_name, p_info in info.items():
-                prefix_ = prefix + p_name
-                if isinstance(p_info[-1], dict):
-                    sub_orig = orig[p_name][1]
-                    sub_info = p_info[1]
-                    prefix_ += "__"
-                    normalize_flattened_hyperspace(scaled, sub_orig, sub_info, prefix_)
-                else:
-                    _, p_range = p_info
-                    interval = p_range[1] - p_range[0]
-                    scaled[prefix_] = (orig[p_name] - p_range[0]) / interval
+                sub_orig = orig[p_name]
+                prefix_ = prefix + "__" + p_name if len(prefix) > 0 else p_name
+                normalize_flattened_hyperspace(scaled, sub_orig, p_info, prefix_)
 
         # 1. Simplex in sphere
         scaled_params_b = {}
         scaled_params_g = {}
         scaled_params_w = {}
         normalize_flattened_hyperspace(
-            scaled_params_b, self._simplex[0].model._get_params(), self.params_range
+            scaled_params_b, self._simplex[0].estimator._get_params(), self.params_range
         )
         normalize_flattened_hyperspace(
-            scaled_params_g, self._simplex[1].model._get_params(), self.params_range
+            scaled_params_g, self._simplex[1].estimator._get_params(), self.params_range
         )
         normalize_flattened_hyperspace(
-            scaled_params_w, self._simplex[2].model._get_params(), self.params_range
+            scaled_params_w, self._simplex[2].estimator._get_params(), self.params_range
         )
 
         max_dist = max(
@@ -267,33 +301,31 @@ class SSPT(base.Estimator):
 
         return False
 
-    @abc.abstractmethod
-    def _drift_input(self, y_true, y_pred) -> typing.Union[int, float]:
-        pass
-
     def _learn_converged(self, x, y):
-        y_pred = self._best_model.predict_one(x)
+        scorer = getattr(self._best_estimator, self._scorer_name)
+        y_pred = scorer(x)
 
-        input = self._drift_input(y, y_pred)
+        input = self.drift_input(y, y_pred)
         self.drift_detector.update(input)
 
         # We need to start the optimization process from scratch
         if self.drift_detector.drift_detected:
             self._n = 0
             self._converged = False
-            self._simplex = self._create_simplex(self._best_model)
+            self._simplex = self._create_simplex(self._best_estimator)
 
             # There is no proven best model right now
-            self._best_model = None
+            self._best_estimator = None
             return
 
-        self._best_model.learn_one(x, y)
+        self._best_estimator.learn_one(x, y)
 
     def _learn_not_converged(self, x, y):
         for wrap in self._simplex:
-            y_pred = wrap.model.predict_one(x)
+            scorer = getattr(wrap.estimator, self._scorer_name)
+            y_pred = scorer(x)
             wrap.metric.update(y, y_pred)
-            wrap.model.learn_one(x, y)
+            wrap.estimator.learn_one(x, y)
 
         # Keep the simplex ordered
         self._sort_simplex()
@@ -302,9 +334,10 @@ class SSPT(base.Estimator):
             self._expanded = self._nelder_mead_expansion()
 
         for wrap in self._expanded.values():
-            y_pred = wrap.model.predict_one(x)
+            scorer = getattr(wrap.estimator, self._scorer_name)
+            y_pred = scorer(x)
             wrap.metric.update(y, y_pred)
-            wrap.model.learn_one(x, y)
+            wrap.estimator.learn_one(x, y)
 
         if self._n == self.grace_period:
             self._n = 0
@@ -317,7 +350,7 @@ class SSPT(base.Estimator):
 
         if self._models_converged:
             self._converged = True
-            self._best_model = self._simplex[0].model
+            self._best_estimator = self._simplex[0].estimator
 
     def learn_one(self, x, y):
         self._n += 1
@@ -330,137 +363,55 @@ class SSPT(base.Estimator):
         return self
 
     @property
-    def best_model(self):
+    def best(self):
         if not self._converged:
             # Lazy selection of the best model
             self._sort_simplex()
-            return self._simplex[0].model
+            return self._simplex[0].estimator
 
-        return self._best_model
+        return self._best_estimator
 
     @property
     def converged(self):
         return self._converged
 
+    def predict_one(self, x, **kwargs):
+        try:
+            return self.best.predict_one(x, **kwargs)
+        except NotImplementedError:
+            border = self.best
+            if isinstance(border, compose.Pipeline):
+                border = border[-1]
+            raise AttributeError(
+                f"'predict_one' is not supported in {border.__class__.__name__}."
+            )
 
-class SSPTClassifier(SSPT, base.Classifier):
-    """Single-pass Self Parameter Tuning Regressor.
+    def predict_proba_one(self, x, **kwargs):
+        try:
+            return self.best.predict_proba_one(x, **kwargs)
+        except NotImplementedError:
+            border = self.best
+            if isinstance(border, compose.Pipeline):
+                border = border[-1]
+            raise AttributeError(
+                f"'predict_proba_one' is not supported in {border.__class__.__name__}."
+            )
 
-    Parameters
-    ----------
-    model
-    metric
-    params_range
-    grace_period
-    drift_detector
-    start
-    convergence_sphere
-    seed
+    def score_one(self, x, **kwargs):
+        try:
+            return self.best.score_one(x, **kwargs)
+        except NotImplementedError:
+            border = self.best
+            if isinstance(border, compose.Pipeline):
+                border = border[-1]
+            raise AttributeError(
+                f"'score_one' is not supported in {border.__class__.__name__}."
+            )
 
-    References
-    ----------
-    [1]: Veloso, B., Gama, J., Malheiro, B., & Vinagre, J. (2021).Hyperparameter self-tuning
-    for data streams. Information Fusion, 76, 75-86.
-    """
-
-    def __init__(
-        self,
-        model: base.Classifier,
-        metric: metrics.base.ClassificationMetric,
-        params_range: typing.Dict[str, typing.Tuple],
-        grace_period: int = 500,
-        drift_detector: base.DriftDetector = drift.ADWIN(),
-        start: str = "warm",
-        convergence_sphere: float = 0.0001,
-        seed: int = None,
-    ):
-        super().__init__(
-            model,
-            metric,
-            params_range,
-            grace_period,
-            drift_detector,
-            start,
-            convergence_sphere,
-            seed,
-        )
-
-    def _drift_input(self, y_true, y_pred):
-        return 0 if y_true == y_pred else 1
-
-    def predict_proba_one(self, x: dict):
-        return self.best_model.predict_proba_one(x)
-
-
-class SSPTRegressor(SSPT, base.Regressor):
-    """Single-pass Self Parameter Tuning Regressor.
-
-    Parameters
-    ----------
-    model
-    metric
-    params_range
-    grace_period
-    drift_detector
-    start
-    convergence_sphere
-    seed
-
-    Examples
-    --------
-    >>> from river import datasets
-    >>> from river import linear_model
-    >>> from river import metrics
-    >>> from river import preprocessing
-    >>> from river_extra import model_selection
-
-    >>> dataset = datasets.synth.Friedman(seed=42).take(2000)
-    >>> reg = preprocessing.StandardScaler() | model_selection.SSPTRegressor(
-        model=linear_model.LinearRegressor(),
-        metric=metrics.RMSE(),
-        params_range={
-            "l2": (float, (0.0, 0.5))
-        }
-    )
-    >>> metric = metrics.RMSE()
-
-    >>> for x, y in dataset:
-    ...     y_pred = reg.predict_one(x)
-    ...     metric.update(y, y_pred)
-    ...     reg.learn_one(x, y)
-
-    >>> metric
-
-    References
-    ----------
-    [1]: Veloso, B., Gama, J., Malheiro, B., & Vinagre, J. (2021).Hyperparameter self-tuning
-    for data streams. Information Fusion, 76, 75-86.
-    """
-
-    def __init__(
-        self,
-        model: base.Regressor,
-        metric: metrics.base.RegressionMetric,
-        params_range: typing.Dict[str, typing.Tuple],
-        grace_period: int = 500,
-        drift_detector: base.DriftDetector = drift.ADWIN(),
-        start: str = "warm",
-        convergence_sphere: float = 0.0001,
-        seed: int = None,
-    ):
-        super().__init__(
-            model,
-            metric,
-            params_range,
-            grace_period,
-            drift_detector,
-            start,
-            convergence_sphere,
-            seed,
-        )
-
-    def _drift_input(self, y_true, y_pred):
-        return abs(y_true - y_pred)
-
-    def predict_one(self, x: dict):
-        return self.best_model.predict_one(x)
+    def debug_one(self, x, **kwargs):
+        try:
+            return self.best.score_one(x, **kwargs)
+        except NotImplementedError:
+            raise AttributeError(
+                f"'debug_one' is not supported in {self.best.__class__.__name__}."
+            )
