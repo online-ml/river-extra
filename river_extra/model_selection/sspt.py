@@ -12,7 +12,26 @@ ModelWrapper = collections.namedtuple("ModelWrapper", "estimator metric")
 
 
 class SSPT(base.Estimator):
-    """Single-pass Self Parameter Tuning"""
+    """Single-pass Self Parameter Tuning
+
+    Parameters
+    ----------
+    estimator
+    metric
+    params_range
+    drift_input
+    grace_period
+    drift_detector
+    start
+    convergence_sphere
+    seed
+
+    References
+    ----------
+    [1]: Veloso, B., Gama, J., Malheiro, B., & Vinagre, J. (2021). Hyperparameter self-tuning
+    for data streams. Information Fusion, 76, 75-86.
+
+    """
 
     _START_RANDOM = "random"
     _START_WARM = "warm"
