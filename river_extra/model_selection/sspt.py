@@ -47,6 +47,7 @@ class SSPT(base.Estimator):
         start: str = "warm",
         convergence_sphere: float = 0.001,
         seed: int = None,
+            #
     ):
         super().__init__()
         self.estimator = estimator
