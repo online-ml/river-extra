@@ -3,6 +3,8 @@ import math
 from river import metrics
 
 from . import base
+from .ssb import SSB
+from .ssw import SSW
 
 __all__ = ["CalinskiHarabasz", "Hartigan", "WB"]
 
@@ -57,8 +59,8 @@ class CalinskiHarabasz(base.ClusteringMetric):
 
     def __init__(self):
         super().__init__()
-        self._ssb = metrics.cluster.SSB()
-        self._ssw = metrics.cluster.SSW()
+        self._ssb = SSB()
+        self._ssw = SSW()
         self._n_clusters = 0
         self._n_points = 0
 
