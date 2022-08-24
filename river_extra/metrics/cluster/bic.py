@@ -3,6 +3,7 @@ import math
 from river import metrics
 
 from . import base
+from .ssw import SSW
 
 
 class BIC(base.ClusteringMetric):
@@ -84,7 +85,7 @@ class BIC(base.ClusteringMetric):
 
     def __init__(self):
         super().__init__()
-        self._ssw = metrics.cluster.SSW()
+        self._ssw = SSW()
         self._n_points_by_clusters = {}
         self._n_clusters = 0
         self._dim = 0
