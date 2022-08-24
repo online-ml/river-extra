@@ -2,3 +2,4 @@ poetry.lock
 *.whl
 *.tar.gz
 *.pyc
+/*.ipynb

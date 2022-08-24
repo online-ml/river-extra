@@ -5,7 +5,7 @@ from river import metrics
 __all__ = ["PrevalenceThreshold"]
 
 
-class PrevalenceThreshold(metrics.BinaryMetric):
+class PrevalenceThreshold(metrics.base.BinaryMetric):
     r"""Prevalence Threshold (PT).
 
     The relationship between a positive predicted value and its target prevalence
