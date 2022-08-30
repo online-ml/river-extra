@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="34d87138-e72e-4e9f-984d-b95c04ec4c2e" name="Changes" comment="">
+    <list default="true" id="34d87138-e72e-4e9f-984d-b95c04ec4c2e" name="Changes" comment="V0.2">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -82,7 +83,30 @@
       <workItem from="1661418478788" duration="2567000" />
       <workItem from="1661501432072" duration="1928000" />
       <workItem from="1661873921575" duration="581000" />
+      <workItem from="1661874667785" duration="321000" />
     </task>
+    <task id="LOCAL-00001" summary="V0.2">
+      <created>1661874813607</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1661874813607</updated>
+    </task>
+    <task id="LOCAL-00002" summary="V0.2">
+      <created>1661874855462</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1661874855462</updated>
+    </task>
+    <task id="LOCAL-00003" summary="V0.2">
+      <created>1661874907408</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1661874907408</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -98,6 +122,10 @@
         </entry>
       </map>
     </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="V0.2" />
+    <option name="LAST_COMMIT_MESSAGE" value="V0.2" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/river_extra$sspt.coverage" NAME="sspt Coverage Results" MODIFIED="1661367333500" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/river_extra/model_selection" />
