@@ -140,11 +140,11 @@ class SSPT(base.Estimator):
         if self.start == self._START_RANDOM:
             # The intermediate 'good' model is defined randomly
             simplex[1] = ModelWrapper(
-                self.estimator.clone(self._random_config()), self.metric.clone()
+                self.estimator.clone(self._random_config()), self.metric.clone(include_attributes=True)
             )
         elif self.start == self._START_WARM:
             # The intermediate 'good' model is defined randomly
-            simplex[1] = ModelWrapper(copy.deepcopy(model), self.metric.clone())
+            simplex[1] = ModelWrapper(model.clone(include_attributes=True), self.metric.clone(include_attributes=True))
 
         return simplex
 
@@ -202,7 +202,7 @@ class SSPT(base.Estimator):
         new_config = apply_operator(e1_params, e2_params, self.params_range, func)
         # Modify the current best contender with the new hyperparameter values
         new = ModelWrapper(
-            copy.deepcopy(self._simplex[0].estimator), self.metric.clone()
+            copy.deepcopy(self._simplex[0].estimator), self.metric.clone(include_attributes=True)
         )
         new.estimator.mutate(new_config)
 
@@ -210,7 +210,8 @@ class SSPT(base.Estimator):
 
     def _nelder_mead_expansion(self) -> typing.Dict:
         """Create expanded models given the simplex models."""
-
+        #print('----------Simplex------------')
+        #print(self._simplex)
         expanded = {}
         # Midpoint between 'best' and 'good'
         expanded["midpoint"] = self._gen_new_estimator(
@@ -237,7 +238,8 @@ class SSPT(base.Estimator):
         expanded["contraction2"] = self._gen_new_estimator(
             expanded["midpoint"], expanded["reflection"], lambda h1, h2: (h1 + h2) / 2
         )
-
+        #print('----------Expanded------------')
+        #print(expanded)
         return expanded
 
     def _nelder_mead_operators(self):
@@ -388,6 +390,10 @@ class SSPT(base.Estimator):
             self._normalize_flattened_hyperspace(
                 scaled_params_w, self._simplex[2].estimator._get_params(), self.params_range
             )
+            print('----------')
+            print('B:',list(scaled_params_b.values()),'Score:',self._simplex[0].metric)
+            print('G:', list(scaled_params_g.values()),'Score:',self._simplex[1].metric)
+            print('W:', list(scaled_params_w.values()),'Score:',self._simplex[2].metric)
             Listv = [list(scaled_params_b.values()), list(scaled_params_g.values()), list(scaled_params_w.values())]
             vectors = np.array(Listv)
             self.old_centroid = dict(zip(scaled_params_b.keys(), np.mean(vectors, axis=0)))
