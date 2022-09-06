@@ -30,7 +30,6 @@ sspt = model_selection.SSPT(
             "n_macro_clusters": (int, (1, 10)),
             "halflife": (float, (0.1, 0.5))
     },
-    start="random",
     drift_input=lambda yt, yp: abs(yt - yp),
     #drift_detector=drift.PageHinkley(),
     convergence_sphere=0.000001,

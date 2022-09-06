@@ -1,6 +1,5 @@
 import collections
 import copy
-import functools
 import math
 import random
 import typing
@@ -23,7 +22,6 @@ class SSPT(base.Estimator):
     drift_input
     grace_period
     drift_detector
-    start
     convergence_sphere
     seed
 
@@ -45,11 +43,8 @@ class SSPT(base.Estimator):
         drift_input: typing.Callable[[float, float], float],
         grace_period: int = 500,
         drift_detector: base.DriftDetector = drift.ADWIN(),
-        start: str = "warm",
         convergence_sphere: float = 0.001,
         seed: int = None,
-        verbose: bool = False,
-            #
     ):
         super().__init__()
         self.estimator = estimator
@@ -59,13 +54,6 @@ class SSPT(base.Estimator):
 
         self.grace_period = grace_period
         self.drift_detector = drift_detector
-        self.verbose = verbose
-
-        if start not in {self._START_RANDOM, self._START_WARM}:
-            raise ValueError(
-                f"'start' must be either '{self._START_RANDOM}' or '{self._START_WARM}'."
-            )
-        self.start = start
         self.convergence_sphere = convergence_sphere
 
         self.seed = seed
@@ -131,20 +119,17 @@ class SSPT(base.Estimator):
         simplex = [None] * 3
 
         simplex[0] = ModelWrapper(
-            self.estimator.clone(self._random_config()), self.metric.clone()
+            self.estimator.clone(self._random_config(), include_attributes=True),
+            self.metric.clone(include_attributes=True)
+        )
+        simplex[1] = ModelWrapper(
+            model.clone(self._random_config(), include_attributes=True),
+            self.metric.clone(include_attributes=True)
         )
         simplex[2] = ModelWrapper(
-            self.estimator.clone(self._random_config()), self.metric.clone()
-        )
-
-        if self.start == self._START_RANDOM:
-            # The intermediate 'good' model is defined randomly
-            simplex[1] = ModelWrapper(
-                self.estimator.clone(self._random_config()), self.metric.clone(include_attributes=True)
-            )
-        elif self.start == self._START_WARM:
-            # The intermediate 'good' model is defined randomly
-            simplex[1] = ModelWrapper(model.clone(include_attributes=True), self.metric.clone(include_attributes=True))
+            self.estimator.clone(self._random_config(), include_attributes=True),
+            self.metric.clone(include_attributes=True)
+        )    
 
         return simplex
 
@@ -299,7 +284,6 @@ class SSPT(base.Estimator):
     @property
     def _models_converged(self) -> bool:
         # Normalize params to ensure they contribute equally to the stopping criterion
-
 
         # 1. Simplex in sphere
         scaled_params_b = {}

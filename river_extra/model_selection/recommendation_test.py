@@ -34,7 +34,6 @@ sspt = model_selection.SSPT(
             }
 
     },
-    start="random",
     drift_input=lambda yt, yp: abs(yt - yp),
     #drift_detector=drift.PageHinkley(),
     convergence_sphere=0.000001,

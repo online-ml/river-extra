@@ -44,7 +44,6 @@ sspt = model_selection.SSPT(
             "intercept_lr": {"learning_rate": (float, (0.009, 0.011))}
         }
     },
-    start="random",
     drift_input=lambda yt, yp: abs(yt - yp),
     drift_detector=drift.PageHinkley(),
     convergence_sphere=0.000001,

@@ -41,7 +41,6 @@ sspt = model_selection.SSPT(
             "grace_period": (int, (100, 500))
         }
     },
-    start="random",
     drift_input=lambda yt, yp: abs(yt - yp),
     #drift_detector=drift.PageHinkley(),
     convergence_sphere=0.000001,
