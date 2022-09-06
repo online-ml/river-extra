@@ -4,6 +4,7 @@ import functools
 import math
 import random
 import typing
+import numpy as np
 
 # TODO use lazy imports where needed
 from river import anomaly, base, compose, drift, metrics, utils
@@ -47,6 +48,8 @@ class SSPT(base.Estimator):
         start: str = "warm",
         convergence_sphere: float = 0.001,
         seed: int = None,
+        verbose: bool = False,
+            #
     ):
         super().__init__()
         self.estimator = estimator
@@ -56,6 +59,7 @@ class SSPT(base.Estimator):
 
         self.grace_period = grace_period
         self.drift_detector = drift_detector
+        self.verbose = verbose
 
         if start not in {self._START_RANDOM, self._START_WARM}:
             raise ValueError(
@@ -136,11 +140,11 @@ class SSPT(base.Estimator):
         if self.start == self._START_RANDOM:
             # The intermediate 'good' model is defined randomly
             simplex[1] = ModelWrapper(
-                self.estimator.clone(self._random_config()), self.metric.clone()
+                self.estimator.clone(self._random_config()), self.metric.clone(include_attributes=True)
             )
         elif self.start == self._START_WARM:
             # The intermediate 'good' model is defined randomly
-            simplex[1] = ModelWrapper(copy.deepcopy(model), self.metric.clone())
+            simplex[1] = ModelWrapper(model.clone(include_attributes=True), self.metric.clone(include_attributes=True))
 
         return simplex
 
@@ -198,7 +202,7 @@ class SSPT(base.Estimator):
         new_config = apply_operator(e1_params, e2_params, self.params_range, func)
         # Modify the current best contender with the new hyperparameter values
         new = ModelWrapper(
-            copy.deepcopy(self._simplex[0].estimator), self.metric.clone()
+            copy.deepcopy(self._simplex[0].estimator), self.metric.clone(include_attributes=True)
         )
         new.estimator.mutate(new_config)
 
@@ -206,7 +210,8 @@ class SSPT(base.Estimator):
 
     def _nelder_mead_expansion(self) -> typing.Dict:
         """Create expanded models given the simplex models."""
-
+        #print('----------Simplex------------')
+        #print(self._simplex)
         expanded = {}
         # Midpoint between 'best' and 'good'
         expanded["midpoint"] = self._gen_new_estimator(
@@ -226,10 +231,15 @@ class SSPT(base.Estimator):
             self._simplex[0], self._simplex[2], lambda h1, h2: (h1 + h2) / 2
         )
         # Contraction of 'midpoint' and 'worst'
-        expanded["contraction"] = self._gen_new_estimator(
+        expanded["contraction1"] = self._gen_new_estimator(
             expanded["midpoint"], self._simplex[2], lambda h1, h2: (h1 + h2) / 2
         )
-
+        # Contraction of 'midpoint' and 'reflection'
+        expanded["contraction2"] = self._gen_new_estimator(
+            expanded["midpoint"], expanded["reflection"], lambda h1, h2: (h1 + h2) / 2
+        )
+        #print('----------Expanded------------')
+        #print(expanded)
         return expanded
 
     def _nelder_mead_operators(self):
@@ -237,7 +247,12 @@ class SSPT(base.Estimator):
         g = self._simplex[1].metric
         w = self._simplex[2].metric
         r = self._expanded["reflection"].metric
-
+        c1 = self._expanded["contraction1"].metric
+        c2 = self._expanded["contraction2"].metric
+        if c1.is_better_than(c2):
+            self._expanded["contraction"] = self._expanded["contraction1"]
+        else:
+            self._expanded["contraction"] = self._expanded["contraction2"]
         if r.is_better_than(g):
             if b.is_better_than(r):
                 self._simplex[2] = self._expanded["reflection"]
@@ -255,50 +270,48 @@ class SSPT(base.Estimator):
                 if c.is_better_than(w):
                     self._simplex[2] = self._expanded["contraction"]
                 else:
-                    s = self._expanded["shrink"].metric
-                    if s.is_better_than(w):
-                        self._simplex[2] = self._expanded["shrink"]
-                    m = self._expanded["midpoint"].metric
-                    if m.is_better_than(g):
-                        self._simplex[1] = self._expanded["midpoint"]
+                    self._simplex[2] = self._expanded["shrink"]
+                    self._simplex[1] = self._expanded["midpoint"]
 
         self._sort_simplex()
+
+    def _normalize_flattened_hyperspace(self, scaled, orig, info, prefix=""):
+        if isinstance(orig, tuple):
+            _, sub_orig = orig
+            for sub_param, sub_info in info.items():
+                prefix_ = prefix + "__" + sub_param
+                self._normalize_flattened_hyperspace(
+                    scaled, sub_orig[sub_param], sub_info, prefix_
+                )
+            return
+
+        if isinstance(info, tuple):
+            _, p_range = info
+            interval = p_range[1] - p_range[0]
+            scaled[prefix] = (orig - p_range[0]) / interval
+            return
+
+        for p_name, p_info in info.items():
+            sub_orig = orig[p_name]
+            prefix_ = prefix + "__" + p_name if len(prefix) > 0 else p_name
+            self._normalize_flattened_hyperspace(scaled, sub_orig, p_info, prefix_)
 
     @property
     def _models_converged(self) -> bool:
         # Normalize params to ensure they contribute equally to the stopping criterion
-        def normalize_flattened_hyperspace(scaled, orig, info, prefix=""):
-            if isinstance(orig, tuple):
-                _, sub_orig = orig
-                for sub_param, sub_info in info.items():
-                    prefix_ = prefix + "__" + sub_param
-                    normalize_flattened_hyperspace(
-                        scaled, sub_orig[sub_param], sub_info, prefix_
-                    )
-                return
 
-            if isinstance(info, tuple):
-                _, p_range = info
-                interval = p_range[1] - p_range[0]
-                scaled[prefix] = (orig - p_range[0]) / interval
-                return
-
-            for p_name, p_info in info.items():
-                sub_orig = orig[p_name]
-                prefix_ = prefix + "__" + p_name if len(prefix) > 0 else p_name
-                normalize_flattened_hyperspace(scaled, sub_orig, p_info, prefix_)
 
         # 1. Simplex in sphere
         scaled_params_b = {}
         scaled_params_g = {}
         scaled_params_w = {}
-        normalize_flattened_hyperspace(
+        self._normalize_flattened_hyperspace(
             scaled_params_b, self._simplex[0].estimator._get_params(), self.params_range
         )
-        normalize_flattened_hyperspace(
+        self._normalize_flattened_hyperspace(
             scaled_params_g, self._simplex[1].estimator._get_params(), self.params_range
         )
-        normalize_flattened_hyperspace(
+        self._normalize_flattened_hyperspace(
             scaled_params_w, self._simplex[2].estimator._get_params(), self.params_range
         )
 
@@ -310,13 +323,17 @@ class SSPT(base.Estimator):
             ]
         )
 
+        Listv = [list(scaled_params_b.values()),list(scaled_params_g.values()),list(scaled_params_w.values())]
+
+        vectors = np.array(Listv)
+        new_centroid = dict(zip(scaled_params_b.keys(), np.mean(vectors, axis=0)))
+        centroid_distance = utils.math.minkowski_distance(self.old_centroid, new_centroid, p=2)
+        self.old_centroid = new_centroid
         ndim = len(self.params_range)
         r_sphere = max_dist * math.sqrt((ndim / (2 * (ndim + 1))))
 
-        if r_sphere < self.convergence_sphere:
+        if r_sphere < self.convergence_sphere or centroid_distance == 0:
             return True
-
-        # TODO? 2. Simplex did not change
 
         return False
 
@@ -360,6 +377,26 @@ class SSPT(base.Estimator):
 
         if self._n == self.grace_period:
             self._n = 0
+            # 1. Simplex in sphere
+            scaled_params_b = {}
+            scaled_params_g = {}
+            scaled_params_w = {}
+            self._normalize_flattened_hyperspace(
+                scaled_params_b, self._simplex[0].estimator._get_params(), self.params_range
+            )
+            self._normalize_flattened_hyperspace(
+                scaled_params_g, self._simplex[1].estimator._get_params(), self.params_range
+            )
+            self._normalize_flattened_hyperspace(
+                scaled_params_w, self._simplex[2].estimator._get_params(), self.params_range
+            )
+            print('----------')
+            print('B:',list(scaled_params_b.values()),'Score:',self._simplex[0].metric)
+            print('G:', list(scaled_params_g.values()),'Score:',self._simplex[1].metric)
+            print('W:', list(scaled_params_w.values()),'Score:',self._simplex[2].metric)
+            Listv = [list(scaled_params_b.values()), list(scaled_params_g.values()), list(scaled_params_w.values())]
+            vectors = np.array(Listv)
+            self.old_centroid = dict(zip(scaled_params_b.keys(), np.mean(vectors, axis=0)))
 
             # Update the simplex models using Nelder-Mead heuristics
             self._nelder_mead_operators()
@@ -367,9 +404,9 @@ class SSPT(base.Estimator):
             # Discard expanded models
             self._expanded = None
 
-        if self._models_converged:
-            self._converged = True
-            self._best_estimator = self._simplex[0].estimator
+            if self._models_converged:
+                self._converged = True
+                self._best_estimator = self._simplex[0].estimator
 
     def learn_one(self, x, y):
         self._n += 1
