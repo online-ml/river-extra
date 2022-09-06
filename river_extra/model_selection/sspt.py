@@ -1,8 +1,10 @@
 import collections
 import copy
 import math
+import numbers
 import random
 import typing
+
 import numpy as np
 
 # TODO use lazy imports where needed
@@ -68,6 +70,9 @@ class SSPT(base.Estimator):
         # Models expanded from the simplex
         self._expanded: typing.Optional[typing.Dict] = None
 
+        # Convergence criterion
+        self._old_centroid = None
+
         # Meta-programming
         border = self.estimator
         if isinstance(border, compose.Pipeline):
@@ -80,36 +85,83 @@ class SSPT(base.Estimator):
         elif isinstance(border, anomaly.base.AnomalyDetector):
             self._scorer_name = "classify"
 
-    def _random_config(self):
-        def gen_random(p_data, e_data):
-            # Sub-component needs to be instantiated
-            if isinstance(e_data, tuple):
-                sub_class, sub_data = e_data
-                sub_config = {}
+    def __generate(self, p_data) -> numbers.Number:
+        p_type, p_range = p_data
+        if p_type == int:
+            return self._rng.randint(p_range[0], p_range[1])
+        elif p_type == float:
+            return self._rng.uniform(p_range[0], p_range[1])
 
-                for sub_param, sub_info in p_data.items():
-                    sub_config[sub_param] = gen_random(sub_info, sub_data[sub_param])
-                return sub_class(**sub_config)
+    def __combine(self, p_info, param1, param2, func):
 
-            # We reached the numeric parameters
-            if isinstance(p_data, tuple):
-                p_type, p_range = p_data
-                if p_type == int:
-                    return self._rng.randint(p_range[0], p_range[1])
-                elif p_type == float:
-                    return self._rng.uniform(p_range[0], p_range[1])
+        p_type, p_range = p_info
+        new_val = func(param1, param2)
 
-            # The sub-parameters need to be expanded
-            config = {}
-            for p_name, p_info in p_data.items():
-                e_info = e_data[p_name]
+        # Range sanity checks
+        if new_val < p_range[0]:
+            new_val = p_range[0]
+        if new_val > p_range[1]:
+            new_val = p_range[1]
+
+        new_val = round(new_val, 0) if p_type == int else new_val
+        return new_val
+
+    def _recurse_params(self, p_data, e1_data, func=None, *, e2_data=None):
+        # Sub-component needs to be instantiated
+        if isinstance(e1_data, tuple):
+            sub_class, sub_data1 = e1_data
+
+            if e2_data is not None:
+                _, sub_data2 = e2_data
+            else:
+                sub_data2 = None
+
+            sub_config = {}
+
+            for sub_param, sub_info in p_data.items():
+                sub_config[sub_param] = self._recurse_params(
+                    sub_info,
+                    sub_data1[sub_param],
+                    func,
+                    e2_data=None if not sub_data2 else sub_data2[sub_param],
+                )
+            return sub_class(**sub_config)
+
+        # We reached the numeric parameters
+        if isinstance(p_data, tuple):
+            if func is None:
+                return self.__generate(p_data)
+            else:
+                return self.__combine(p_data, e1_data, e2_data, func)
+
+        # The sub-parameters need to be expanded
+        config = {}
+        for p_name, p_info in p_data.items():
+            e1_info = e1_data[p_name]
+
+            if e2_data is not None:
+                e2_info = e2_data[p_name]
+            else:
+                e2_info = None
+
+            if not isinstance(p_info, dict):
+                config[p_name] = self._recurse_params(
+                    p_info, e1_info, func, e2_data=e2_info
+                )
+            else:
                 sub_config = {}
                 for sub_name, sub_info in p_info.items():
-                    sub_config[sub_name] = gen_random(sub_info, e_info[sub_name])
+                    sub_config[sub_name] = self._recurse_params(
+                        sub_info,
+                        e1_info[sub_name],
+                        func,
+                        e2_data=None if not e2_info else e2_info[sub_name],
+                    )
                 config[p_name] = sub_config
-            return config
+        return config
 
-        return gen_random(self.params_range, self.estimator._get_params())
+    def _random_config(self):
+        return self._recurse_params(self.params_range, self.estimator._get_params())
 
     def _create_simplex(self, model) -> typing.List:
         # The simplex is divided in:
@@ -120,16 +172,16 @@ class SSPT(base.Estimator):
 
         simplex[0] = ModelWrapper(
             self.estimator.clone(self._random_config(), include_attributes=True),
-            self.metric.clone(include_attributes=True)
+            self.metric.clone(include_attributes=True),
         )
         simplex[1] = ModelWrapper(
             model.clone(self._random_config(), include_attributes=True),
-            self.metric.clone(include_attributes=True)
+            self.metric.clone(include_attributes=True),
         )
         simplex[2] = ModelWrapper(
             self.estimator.clone(self._random_config(), include_attributes=True),
-            self.metric.clone(include_attributes=True)
-        )    
+            self.metric.clone(include_attributes=True),
+        )
 
         return simplex
 
@@ -143,51 +195,14 @@ class SSPT(base.Estimator):
     def _gen_new_estimator(self, e1, e2, func):
         """Generate new configuration given two estimators and a combination function."""
 
-        def apply_operator(param1, param2, p_info, func):
-            if isinstance(param1, tuple):
-                sub_class, sub_params1 = param1
-                _, sub_params2 = param2
+        e1_p = e1.estimator._get_params()
+        e2_p = e2.estimator._get_params()
 
-                sub_config = {}
-                for sub_param, sub_info in p_info.items():
-                    sub_config[sub_param] = apply_operator(
-                        sub_params1[sub_param], sub_params2[sub_param], sub_info, func
-                    )
-                return sub_class(**sub_config)
-            if isinstance(p_info, tuple):
-                p_type, p_range = p_info
-                new_val = func(param1, param2)
-
-                # Range sanity checks
-                if new_val < p_range[0]:
-                    new_val = p_range[0]
-                if new_val > p_range[1]:
-                    new_val = p_range[1]
-
-                new_val = round(new_val, 0) if p_type == int else new_val
-                return new_val
-
-            # The sub-parameters need to be expanded
-            config = {}
-            for p_name, inner_p_info in p_info.items():
-                sub_param1 = param1[p_name]
-                sub_param2 = param2[p_name]
-
-                sub_config = {}
-                for sub_name, sub_info in inner_p_info.items():
-                    sub_config[sub_name] = apply_operator(
-                        sub_param1[sub_name], sub_param2[sub_name], sub_info, func
-                    )
-                config[p_name] = sub_config
-            return config
-
-        e1_params = e1.estimator._get_params()
-        e2_params = e2.estimator._get_params()
-
-        new_config = apply_operator(e1_params, e2_params, self.params_range, func)
+        new_config = self._recurse_params(self.params_range, e1_p, func, e2_data=e2_p)
         # Modify the current best contender with the new hyperparameter values
         new = ModelWrapper(
-            copy.deepcopy(self._simplex[0].estimator), self.metric.clone(include_attributes=True)
+            copy.deepcopy(self._simplex[0].estimator),
+            self.metric.clone(include_attributes=True),
         )
         new.estimator.mutate(new_config)
 
@@ -195,8 +210,6 @@ class SSPT(base.Estimator):
 
     def _nelder_mead_expansion(self) -> typing.Dict:
         """Create expanded models given the simplex models."""
-        #print('----------Simplex------------')
-        #print(self._simplex)
         expanded = {}
         # Midpoint between 'best' and 'good'
         expanded["midpoint"] = self._gen_new_estimator(
@@ -223,8 +236,7 @@ class SSPT(base.Estimator):
         expanded["contraction2"] = self._gen_new_estimator(
             expanded["midpoint"], expanded["reflection"], lambda h1, h2: (h1 + h2) / 2
         )
-        #print('----------Expanded------------')
-        #print(expanded)
+
         return expanded
 
     def _nelder_mead_operators(self):
@@ -307,13 +319,19 @@ class SSPT(base.Estimator):
             ]
         )
 
-        Listv = [list(scaled_params_b.values()),list(scaled_params_g.values()),list(scaled_params_w.values())]
+        hyper_points = [
+            list(scaled_params_b.values()),
+            list(scaled_params_g.values()),
+            list(scaled_params_w.values()),
+        ]
 
-        vectors = np.array(Listv)
+        vectors = np.array(hyper_points)
         new_centroid = dict(zip(scaled_params_b.keys(), np.mean(vectors, axis=0)))
-        centroid_distance = utils.math.minkowski_distance(self.old_centroid, new_centroid, p=2)
-        self.old_centroid = new_centroid
-        ndim = len(self.params_range)
+        centroid_distance = utils.math.minkowski_distance(
+            self._old_centroid, new_centroid, p=2
+        )
+        self._old_centroid = new_centroid
+        ndim = len(scaled_params_b)
         r_sphere = max_dist * math.sqrt((ndim / (2 * (ndim + 1))))
 
         if r_sphere < self.convergence_sphere or centroid_distance == 0:
@@ -366,21 +384,39 @@ class SSPT(base.Estimator):
             scaled_params_g = {}
             scaled_params_w = {}
             self._normalize_flattened_hyperspace(
-                scaled_params_b, self._simplex[0].estimator._get_params(), self.params_range
+                scaled_params_b,
+                self._simplex[0].estimator._get_params(),
+                self.params_range,
             )
             self._normalize_flattened_hyperspace(
-                scaled_params_g, self._simplex[1].estimator._get_params(), self.params_range
+                scaled_params_g,
+                self._simplex[1].estimator._get_params(),
+                self.params_range,
             )
             self._normalize_flattened_hyperspace(
-                scaled_params_w, self._simplex[2].estimator._get_params(), self.params_range
+                scaled_params_w,
+                self._simplex[2].estimator._get_params(),
+                self.params_range,
             )
-            print('----------')
-            print('B:',list(scaled_params_b.values()),'Score:',self._simplex[0].metric)
-            print('G:', list(scaled_params_g.values()),'Score:',self._simplex[1].metric)
-            print('W:', list(scaled_params_w.values()),'Score:',self._simplex[2].metric)
-            Listv = [list(scaled_params_b.values()), list(scaled_params_g.values()), list(scaled_params_w.values())]
-            vectors = np.array(Listv)
-            self.old_centroid = dict(zip(scaled_params_b.keys(), np.mean(vectors, axis=0)))
+            print("----------")
+            print(
+                "B:", list(scaled_params_b.values()), "Score:", self._simplex[0].metric
+            )
+            print(
+                "G:", list(scaled_params_g.values()), "Score:", self._simplex[1].metric
+            )
+            print(
+                "W:", list(scaled_params_w.values()), "Score:", self._simplex[2].metric
+            )
+            hyper_points = [
+                list(scaled_params_b.values()),
+                list(scaled_params_g.values()),
+                list(scaled_params_w.values()),
+            ]
+            vectors = np.array(hyper_points)
+            self._old_centroid = dict(
+                zip(scaled_params_b.keys(), np.mean(vectors, axis=0))
+            )
 
             # Update the simplex models using Nelder-Mead heuristics
             self._nelder_mead_operators()
