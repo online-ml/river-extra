@@ -106,7 +106,14 @@ class SSPT(base.Estimator):
         new_val = round(new_val, 0) if p_type == int else new_val
         return new_val
 
-    def _recurse_params(self, p_data, e1_data, func=None, *, e2_data=None):
+    def __flatten(self, prefix, scaled, p_info, e_info):
+        _, p_range = p_info
+        interval = p_range[1] - p_range[0]
+        scaled[prefix] = (e_info - p_range[0]) / interval
+
+    def _recurse_params(
+        self, p_data, e1_data, func=None, *, e2_data=None, prefix=None, scaled=None
+    ):
         # Sub-component needs to be instantiated
         if isinstance(e1_data, tuple):
             sub_class, sub_data1 = e1_data
@@ -119,20 +126,27 @@ class SSPT(base.Estimator):
             sub_config = {}
 
             for sub_param, sub_info in p_data.items():
+                if prefix is not None:
+                    prefix_ = prefix + "__" + sub_param
+
                 sub_config[sub_param] = self._recurse_params(
                     sub_info,
                     sub_data1[sub_param],
                     func,
                     e2_data=None if not sub_data2 else sub_data2[sub_param],
+                    prefix=None if prefix is None else prefix_,
+                    scaled=scaled,
                 )
             return sub_class(**sub_config)
 
         # We reached the numeric parameters
         if isinstance(p_data, tuple):
-            if func is None:
+            if func is None and prefix is None:
                 return self.__generate(p_data)
-            else:
-                return self.__combine(p_data, e1_data, e2_data, func)
+            if prefix is not None:
+                self.__flatten(prefix, scaled, p_data, e1_data)
+                return
+            return self.__combine(p_data, e1_data, e2_data, func)
 
         # The sub-parameters need to be expanded
         config = {}
@@ -144,9 +158,17 @@ class SSPT(base.Estimator):
             else:
                 e2_info = None
 
+            if prefix is not None:
+                prefix_ = prefix + "__" + p_name if len(prefix) > 0 else p_name
+
             if not isinstance(p_info, dict):
                 config[p_name] = self._recurse_params(
-                    p_info, e1_info, func, e2_data=e2_info
+                    p_info,
+                    e1_info,
+                    func,
+                    e2_data=e2_info,
+                    prefix=None if prefix is None else prefix_,
+                    scaled=scaled,
                 )
             else:
                 sub_config = {}
@@ -156,6 +178,8 @@ class SSPT(base.Estimator):
                         e1_info[sub_name],
                         func,
                         e2_data=None if not e2_info else e2_info[sub_name],
+                        prefix=None if prefix is None else prefix_,
+                        scaled=scaled,
                     )
                 config[p_name] = sub_config
         return config
@@ -272,43 +296,24 @@ class SSPT(base.Estimator):
 
         self._sort_simplex()
 
-    def _normalize_flattened_hyperspace(self, scaled, orig, info, prefix=""):
-        if isinstance(orig, tuple):
-            _, sub_orig = orig
-            for sub_param, sub_info in info.items():
-                prefix_ = prefix + "__" + sub_param
-                self._normalize_flattened_hyperspace(
-                    scaled, sub_orig[sub_param], sub_info, prefix_
-                )
-            return
-
-        if isinstance(info, tuple):
-            _, p_range = info
-            interval = p_range[1] - p_range[0]
-            scaled[prefix] = (orig - p_range[0]) / interval
-            return
-
-        for p_name, p_info in info.items():
-            sub_orig = orig[p_name]
-            prefix_ = prefix + "__" + p_name if len(prefix) > 0 else p_name
-            self._normalize_flattened_hyperspace(scaled, sub_orig, p_info, prefix_)
+    def _normalize_flattened_hyperspace(self, orig):
+        scaled = {}
+        self._recurse_params(self.params_range, e1_data=orig, prefix="", scaled=scaled)
+        return scaled
 
     @property
     def _models_converged(self) -> bool:
         # Normalize params to ensure they contribute equally to the stopping criterion
 
         # 1. Simplex in sphere
-        scaled_params_b = {}
-        scaled_params_g = {}
-        scaled_params_w = {}
-        self._normalize_flattened_hyperspace(
-            scaled_params_b, self._simplex[0].estimator._get_params(), self.params_range
+        scaled_params_b = self._normalize_flattened_hyperspace(
+            self._simplex[0].estimator._get_params()
         )
-        self._normalize_flattened_hyperspace(
-            scaled_params_g, self._simplex[1].estimator._get_params(), self.params_range
+        scaled_params_g = self._normalize_flattened_hyperspace(
+            self._simplex[1].estimator._get_params()
         )
-        self._normalize_flattened_hyperspace(
-            scaled_params_w, self._simplex[2].estimator._get_params(), self.params_range
+        scaled_params_w = self._normalize_flattened_hyperspace(
+            self._simplex[2].estimator._get_params()
         )
 
         max_dist = max(
@@ -380,23 +385,14 @@ class SSPT(base.Estimator):
         if self._n == self.grace_period:
             self._n = 0
             # 1. Simplex in sphere
-            scaled_params_b = {}
-            scaled_params_g = {}
-            scaled_params_w = {}
-            self._normalize_flattened_hyperspace(
-                scaled_params_b,
+            scaled_params_b = self._normalize_flattened_hyperspace(
                 self._simplex[0].estimator._get_params(),
-                self.params_range,
             )
-            self._normalize_flattened_hyperspace(
-                scaled_params_g,
+            scaled_params_g = self._normalize_flattened_hyperspace(
                 self._simplex[1].estimator._get_params(),
-                self.params_range,
             )
-            self._normalize_flattened_hyperspace(
-                scaled_params_w,
+            scaled_params_w = self._normalize_flattened_hyperspace(
                 self._simplex[2].estimator._get_params(),
-                self.params_range,
             )
             print("----------")
             print(
