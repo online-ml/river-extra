@@ -1,3 +1,4 @@
+from ast import operator
 import collections
 import copy
 import math
@@ -112,40 +113,43 @@ class SSPT(base.Estimator):
         scaled[prefix] = (e_info - p_range[0]) / interval
 
     def _recurse_params(
-        self, p_data, e1_data, func=None, *, e2_data=None, prefix=None, scaled=None
+        self, operation, p_data, e1_data, *, func=None, e2_data=None, prefix=None, scaled=None
     ):
         # Sub-component needs to be instantiated
         if isinstance(e1_data, tuple):
             sub_class, sub_data1 = e1_data
 
-            if e2_data is not None:
+            if operation == "combine":
                 _, sub_data2 = e2_data
             else:
-                sub_data2 = None
+                sub_data2 = {}
 
             sub_config = {}
-
             for sub_param, sub_info in p_data.items():
-                if prefix is not None:
-                    prefix_ = prefix + "__" + sub_param
+                if operation == "scale":
+                    sub_prefix = prefix + "__" + sub_param
+                else:
+                    sub_prefix = None
 
                 sub_config[sub_param] = self._recurse_params(
-                    sub_info,
-                    sub_data1[sub_param],
-                    func,
-                    e2_data=None if not sub_data2 else sub_data2[sub_param],
-                    prefix=None if prefix is None else prefix_,
+                    operation=operation,
+                    p_data=sub_info,
+                    e1_data=sub_data1[sub_param],
+                    func=func,
+                    e2_data=sub_data2.get(sub_param, None),
+                    prefix=sub_prefix,
                     scaled=scaled,
                 )
             return sub_class(**sub_config)
 
         # We reached the numeric parameters
         if isinstance(p_data, tuple):
-            if func is None and prefix is None:
+            if operation == "generate":
                 return self.__generate(p_data)
-            if prefix is not None:
+            if operation == "scale":
                 self.__flatten(prefix, scaled, p_data, e1_data)
                 return
+            # combine
             return self.__combine(p_data, e1_data, e2_data, func)
 
         # The sub-parameters need to be expanded
@@ -153,39 +157,53 @@ class SSPT(base.Estimator):
         for p_name, p_info in p_data.items():
             e1_info = e1_data[p_name]
 
-            if e2_data is not None:
+            if operation == "combine":
                 e2_info = e2_data[p_name]
             else:
-                e2_info = None
+                e2_info = {}
 
-            if prefix is not None:
-                prefix_ = prefix + "__" + p_name if len(prefix) > 0 else p_name
+            if operation == "scale":
+                sub_prefix = prefix + "__" + p_name if len(prefix) > 0 else p_name
+            else:
+                sub_prefix = None
 
             if not isinstance(p_info, dict):
                 config[p_name] = self._recurse_params(
-                    p_info,
-                    e1_info,
-                    func,
+                    operation=operation,
+                    p_data=p_info,
+                    e1_data=e1_info,
+                    func=func,
                     e2_data=e2_info,
-                    prefix=None if prefix is None else prefix_,
+                    prefix=sub_prefix,
                     scaled=scaled,
                 )
             else:
                 sub_config = {}
                 for sub_name, sub_info in p_info.items():
+
+                    if operation == "scale":
+                        sub_prefix2 = sub_prefix + "__" + sub_name
+                    else:
+                        sub_prefix2 = None
+
                     sub_config[sub_name] = self._recurse_params(
-                        sub_info,
-                        e1_info[sub_name],
-                        func,
-                        e2_data=None if not e2_info else e2_info[sub_name],
-                        prefix=None if prefix is None else prefix_,
+                        operation=operation,
+                        p_data=sub_info,
+                        e1_data=e1_info[sub_name],
+                        func=func,
+                        e2_data=e2_info.get(sub_name, None),
+                        prefix=sub_prefix2,
                         scaled=scaled,
                     )
                 config[p_name] = sub_config
         return config
 
     def _random_config(self):
-        return self._recurse_params(self.params_range, self.estimator._get_params())
+        return self._recurse_params(
+            operation="generate",
+            p_data=self.params_range,
+            e1_data=self.estimator._get_params()
+        )
 
     def _create_simplex(self, model) -> typing.List:
         # The simplex is divided in:
@@ -222,7 +240,13 @@ class SSPT(base.Estimator):
         e1_p = e1.estimator._get_params()
         e2_p = e2.estimator._get_params()
 
-        new_config = self._recurse_params(self.params_range, e1_p, func, e2_data=e2_p)
+        new_config = self._recurse_params(
+            operation="combine",
+            p_data=self.params_range,
+            e1_data=e1_p,
+            func=func,
+            e2_data=e2_p
+        )
         # Modify the current best contender with the new hyperparameter values
         new = ModelWrapper(
             copy.deepcopy(self._simplex[0].estimator),
@@ -298,7 +322,13 @@ class SSPT(base.Estimator):
 
     def _normalize_flattened_hyperspace(self, orig):
         scaled = {}
-        self._recurse_params(self.params_range, e1_data=orig, prefix="", scaled=scaled)
+        self._recurse_params(
+            operation="scale",
+            p_data=self.params_range,
+            e1_data=orig,
+            prefix="",
+            scaled=scaled
+        )
         return scaled
 
     @property
