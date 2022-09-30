@@ -4,3 +4,4 @@ poetry.lock
 *.tar.gz
 *.pyc
 /*.ipynb
+.DS_Store
