@@ -611,7 +611,7 @@ class ExtraTreesRegressor(ExtraTrees, base.Regressor):
 
     References
     ----------
-    Mastelini, S. M., Nakano, F. K., Vens, C., & de Leon Ferreira, A. C. P. (2022).
+    [^1]: Mastelini, S. M., Nakano, F. K., Vens, C., & de Leon Ferreira, A. C. P. (2022).
     Online Extra Trees Regressor. IEEE Transactions on Neural Networks and Learning Systems.
 
     """
