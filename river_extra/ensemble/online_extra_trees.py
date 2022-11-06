@@ -470,7 +470,7 @@ class ETRegressor(tree.HoeffdingTreeRegressor):
 class ExtraTreesRegressor(ExtraTrees, base.Regressor):
     """Online Extra Trees regressor.
 
-    The online Extra Trees ensemble takes some steps further into randomization when
+    The online Extra Trees[^1] ensemble takes some steps further into randomization when
     compared to Adaptive Random Forests (ARF). A subspace of the feature space is considered
     at each split attempt, as ARF does, and online bagging or subbagging can also be
     (optionally) used. Nonetheless, Extra Trees randomizes the split candidates evaluated by each
@@ -608,6 +608,11 @@ class ExtraTreesRegressor(ExtraTrees, base.Regressor):
 
     >>> evaluate.progressive_val_score(dataset, model, metric)
     RMSE: 3.24238
+
+    References
+    ----------
+    Mastelini, S. M., Nakano, F. K., Vens, C., & de Leon Ferreira, A. C. P. (2022).
+    Online Extra Trees Regressor. IEEE Transactions on Neural Networks and Learning Systems.
 
     """
 
