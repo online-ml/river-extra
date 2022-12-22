@@ -14,7 +14,7 @@ baseline_metric = metrics.RMSE()
 baseline_rolling_metric = utils.Rolling(metrics.RMSE(), window_size=100)
 baseline_metric_plt = []
 baseline_rolling_metric_plt = []
-baseline = preprocessing.AdaptiveStandardScaler() | linear_model.LinearRegression()
+baseline = preprocessing.StandardScaler() | linear_model.LinearRegression()
 
 # SSPT - model and metric
 sspt_metric = metrics.RMSE()
@@ -22,11 +22,10 @@ sspt_rolling_metric = utils.Rolling(metrics.RMSE(), window_size=100)
 sspt_metric_plt = []
 sspt_rolling_metric_plt = []
 sspt = model_selection.SSPT(
-    estimator=preprocessing.AdaptiveStandardScaler() | linear_model.LinearRegression(),
+    estimator=preprocessing.StandardScaler() | linear_model.LinearRegression(),
     metric=metrics.RMSE(),
     grace_period=100,
     params_range={
-        "AdaptiveStandardScaler": {"alpha": (float, (0.25, 0.35))},
         "LinearRegression": {
             "l2": (float, (0.0, 0.0001)),
             "optimizer": {"lr": {"learning_rate": (float, (0.009, 0.011))}},

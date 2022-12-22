@@ -86,123 +86,133 @@ class SSPT(base.Estimator):
         elif isinstance(border, anomaly.base.AnomalyDetector):
             self._scorer_name = "classify"
 
-    def __generate(self, p_data) -> numbers.Number:
-        p_type, p_range = p_data
-        if p_type == int:
-            return self._rng.randint(p_range[0], p_range[1])
-        elif p_type == float:
-            return self._rng.uniform(p_range[0], p_range[1])
+    def __generate(self, hp_data) -> numbers.Number:
+        hp_type, hp_range = hp_data
+        if hp_type == int:
+            return self._rng.randint(hp_range[0], hp_range[1])
+        elif hp_type == float:
+            return self._rng.uniform(hp_range[0], hp_range[1])
 
-    def __combine(self, p_info, param1, param2, func):
-
-        p_type, p_range = p_info
-        new_val = func(param1, param2)
+    def __combine(self, hp_data, hp_est_1, hp_est_2, func) -> numbers.Number:
+        hp_type, hp_range = hp_data
+        new_val = func(hp_est_1, hp_est_2)
 
         # Range sanity checks
-        if new_val < p_range[0]:
-            new_val = p_range[0]
-        if new_val > p_range[1]:
-            new_val = p_range[1]
+        if new_val < hp_range[0]:
+            new_val = hp_range[0]
+        if new_val > hp_range[1]:
+            new_val = hp_range[1]
 
-        new_val = round(new_val, 0) if p_type == int else new_val
+        new_val = round(new_val, 0) if hp_type == int else new_val
         return new_val
 
-    def __flatten(self, prefix, scaled, p_info, e_info):
-        _, p_range = p_info
-        interval = p_range[1] - p_range[0]
-        scaled[prefix] = (e_info - p_range[0]) / interval
+    def __flatten(self, prefix, scaled_hps, hp_data, est_data):
+        hp_range = hp_data[1]
+        interval = hp_range[1] - hp_range[0]
+        scaled_hps[prefix] = (est_data - hp_range[0]) / interval
 
-    def _recurse_params(
-        self, operation, p_data, e1_data, *, func=None, e2_data=None, prefix=None, scaled=None
-    ):
+    def _traverse_hps(
+        self, operation: str, hp_data: dict, est_1, *, func=None, est_2=None, hp_prefix=None, scaled_hps=None
+    ) -> typing.Optional[typing.Union[dict, numbers.Number]]:
+        """Traverse the hyperparameters of the estimator/pipeline and perform an operation.
+
+        Parameters
+        ----------
+        operation
+            The operation that is intented to apply over the hyperparameters. Can be either:
+            "combine" (combine parameters from two pipelines), "scale" (scale a flattened
+            version of the hyperparameter hierarchy to use in the stopping criteria), or
+            "generate" (create a new hyperparameter set candidate).
+        hp_data
+            The hyperparameter data which was passed by the user. Defines the ranges to
+            explore for each hyperparameter.
+        est_1
+            The hyperparameter structure of the first pipeline/estimator. Such structure is obtained
+            via a `_get_params()` method call. Both 'hp_data' and 'est_1' will be jointly traversed.
+        func
+            A function that is used to combine the values in `est_1` and `est_2`, in case
+            `operation="combine"`.
+        est_2
+            A second pipeline/estimator which is going to be combined with `est_1`, in case
+            `operation="combine"`.
+        hp_prefix
+            A hyperparameter prefix which is used to identify each hyperparameter in the hyperparameter
+            hierarchy when `operation="scale"`. The recursive traversal will modify this prefix accordingly
+            to the current position in the hierarchy. Initially it is set to `None`.
+        scaled_hps
+            Flattened version of the hyperparameter hierarchy which is used for evaluating stopping criteria.
+            Set to `None` and defined automatically when `operation="scale"`.
+        """
+
         # Sub-component needs to be instantiated
-        if isinstance(e1_data, tuple):
-            sub_class, sub_data1 = e1_data
+        if isinstance(est_1, tuple):
+            sub_class, est_1 = est_1
 
             if operation == "combine":
-                _, sub_data2 = e2_data
+                est_2 = est_2[1]
             else:
-                sub_data2 = {}
+                est_2 = {}
 
             sub_config = {}
-            for sub_param, sub_info in p_data.items():
+            for sub_hp_name, sub_hp_data in hp_data.items():
                 if operation == "scale":
-                    sub_prefix = prefix + "__" + sub_param
+                    sub_hp_prefix = hp_prefix + "__" + sub_hp_name
                 else:
-                    sub_prefix = None
+                    sub_hp_prefix = None
 
-                sub_config[sub_param] = self._recurse_params(
+                sub_config[sub_hp_name] = self._traverse_hps(
                     operation=operation,
-                    p_data=sub_info,
-                    e1_data=sub_data1[sub_param],
+                    hp_data=sub_hp_data,
+                    est_1=est_1[sub_hp_name],
                     func=func,
-                    e2_data=sub_data2.get(sub_param, None),
-                    prefix=sub_prefix,
-                    scaled=scaled,
+                    est_2=est_2.get(sub_hp_name, None),
+                    hp_prefix=sub_hp_prefix,
+                    scaled_hps=scaled_hps,
                 )
             return sub_class(**sub_config)
 
         # We reached the numeric parameters
-        if isinstance(p_data, tuple):
+        if isinstance(est_1, numbers.Number):
             if operation == "generate":
-                return self.__generate(p_data)
+                return self.__generate(hp_data)
             if operation == "scale":
-                self.__flatten(prefix, scaled, p_data, e1_data)
+                self.__flatten(hp_prefix, scaled_hps, hp_data, est_1)
                 return
             # combine
-            return self.__combine(p_data, e1_data, e2_data, func)
+            return self.__combine(hp_data, est_1, est_2, func)
 
         # The sub-parameters need to be expanded
         config = {}
-        for p_name, p_info in p_data.items():
-            e1_info = e1_data[p_name]
+        for sub_hp_name, sub_hp_data in hp_data.items():
+            sub_est_1 = est_1[sub_hp_name]
 
             if operation == "combine":
-                e2_info = e2_data[p_name]
+                sub_est_2 = est_2[sub_hp_name]
             else:
-                e2_info = {}
+                sub_est_2 = {}
 
             if operation == "scale":
-                sub_prefix = prefix + "__" + p_name if len(prefix) > 0 else p_name
+                sub_hp_prefix = hp_prefix + "__" + sub_hp_name if len(hp_prefix) > 0 else sub_hp_name
             else:
-                sub_prefix = None
+                sub_hp_prefix = None
+            
+            config[sub_hp_name] = self._traverse_hps(
+                operation=operation,
+                hp_data=sub_hp_data,
+                est_1=sub_est_1,
+                func=func,
+                est_2=sub_est_2,
+                hp_prefix=sub_hp_prefix,
+                scaled_hps=scaled_hps,
+            )
 
-            if not isinstance(p_info, dict):
-                config[p_name] = self._recurse_params(
-                    operation=operation,
-                    p_data=p_info,
-                    e1_data=e1_info,
-                    func=func,
-                    e2_data=e2_info,
-                    prefix=sub_prefix,
-                    scaled=scaled,
-                )
-            else:
-                sub_config = {}
-                for sub_name, sub_info in p_info.items():
-
-                    if operation == "scale":
-                        sub_prefix2 = sub_prefix + "__" + sub_name
-                    else:
-                        sub_prefix2 = None
-
-                    sub_config[sub_name] = self._recurse_params(
-                        operation=operation,
-                        p_data=sub_info,
-                        e1_data=e1_info[sub_name],
-                        func=func,
-                        e2_data=e2_info.get(sub_name, None),
-                        prefix=sub_prefix2,
-                        scaled=scaled,
-                    )
-                config[p_name] = sub_config
         return config
 
     def _random_config(self):
-        return self._recurse_params(
+        return self._traverse_hps(
             operation="generate",
-            p_data=self.params_range,
-            e1_data=self.estimator._get_params()
+            hp_data=self.params_range,
+            est_1=self.estimator._get_params()
         )
 
     def _create_simplex(self, model) -> typing.List:
@@ -237,16 +247,17 @@ class SSPT(base.Estimator):
     def _gen_new_estimator(self, e1, e2, func):
         """Generate new configuration given two estimators and a combination function."""
 
-        e1_p = e1.estimator._get_params()
-        e2_p = e2.estimator._get_params()
+        est_1_hps = e1.estimator._get_params()
+        est_2_hps = e2.estimator._get_params()
 
-        new_config = self._recurse_params(
+        new_config = self._traverse_hps(
             operation="combine",
-            p_data=self.params_range,
-            e1_data=e1_p,
+            hp_data=self.params_range,
+            est_1=est_1_hps,
             func=func,
-            e2_data=e2_p
+            est_2=est_2_hps
         )
+
         # Modify the current best contender with the new hyperparameter values
         new = ModelWrapper(
             copy.deepcopy(self._simplex[0].estimator),
@@ -322,12 +333,12 @@ class SSPT(base.Estimator):
 
     def _normalize_flattened_hyperspace(self, orig):
         scaled = {}
-        self._recurse_params(
+        self._traverse_hps(
             operation="scale",
-            p_data=self.params_range,
-            e1_data=orig,
-            prefix="",
-            scaled=scaled
+            hp_data=self.params_range,
+            est_1=orig,
+            hp_prefix="",
+            scaled_hps=scaled
         )
         return scaled
 
