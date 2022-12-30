@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from river import datasets, drift, linear_model, metrics, preprocessing, utils
+from river import datasets, drift, linear_model, metrics, preprocessing, utils, rules
 
 from river_extra import model_selection
 
@@ -14,7 +14,7 @@ baseline_metric = metrics.RMSE()
 baseline_rolling_metric = utils.Rolling(metrics.RMSE(), window_size=100)
 baseline_metric_plt = []
 baseline_rolling_metric_plt = []
-baseline = preprocessing.AdaptiveStandardScaler() | linear_model.LinearRegression()
+baseline = preprocessing.AdaptiveStandardScaler() | rules.AMRules()
 
 # SSPT - model and metric
 sspt_metric = metrics.RMSE()
@@ -22,15 +22,14 @@ sspt_rolling_metric = utils.Rolling(metrics.RMSE(), window_size=100)
 sspt_metric_plt = []
 sspt_rolling_metric_plt = []
 sspt = model_selection.SSPT(
-    estimator=preprocessing.AdaptiveStandardScaler() | linear_model.LinearRegression(),
+    estimator=preprocessing.AdaptiveStandardScaler() | rules.AMRules(),
     metric=metrics.RMSE(),
     grace_period=100,
     params_range={
         "AdaptiveStandardScaler": {"alpha": (float, (0.25, 0.35))},
-        "LinearRegression": {
-            "l2": (float, (0.0, 0.0001)),
-            "optimizer": {"lr": {"learning_rate": (float, (0.009, 0.011))}},
-            "intercept_lr": {"learning_rate": (float, (0.009, 0.011))},
+        "AMRules": {
+            "delta": (float, (0.005, 0.02)),
+            "n_min": (int, (50, 500))
         },
     },
     drift_input=lambda yt, yp: abs(yt - yp),

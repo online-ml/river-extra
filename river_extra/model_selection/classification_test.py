@@ -31,8 +31,11 @@ sspt = model_selection.SSPT(
     metric=sspt_rolling_metric,
     grace_period=100,
     params_range={
-        "delta": (float, (0.00001, 0.0001)),
-        "grace_period": (int, (100, 500)),
+        "AdaptiveStandardScaler": {"alpha": (float, (0.25, 0.35))},
+        "HoeffdingTreeClassifier": {
+            "delta": (float, (0.00001, 0.0001)),
+            "grace_period": (int, (100, 500)),
+        },
     },
     drift_input=lambda yt, yp: 0 if yt == yp else 1,
     convergence_sphere=0.000001,
