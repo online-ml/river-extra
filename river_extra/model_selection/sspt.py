@@ -295,42 +295,6 @@ class SSPT(base.Estimator):
         c1 = self._expanded["contraction1"].metric
         c2 = self._expanded["contraction2"].metric
 
-        scaled_params = list(self._normalize_flattened_hyperspace(
-            self._simplex[0].estimator._get_params(),
-        ).values())
-
-        scaled_params = list(self._normalize_flattened_hyperspace(
-            self._simplex[1].estimator._get_params(),
-        ).values())
-
-        scaled_params = list(self._normalize_flattened_hyperspace(
-            self._simplex[2].estimator._get_params(),
-        ).values())
-
-        scaled_params = list(self._normalize_flattened_hyperspace(
-            self._expanded["reflection"].estimator._get_params(),
-        ).values())
-
-        scaled_params = list(self._normalize_flattened_hyperspace(
-            self._expanded["contraction1"].estimator._get_params(),
-        ).values())
-
-        scaled_params = list(self._normalize_flattened_hyperspace(
-            self._expanded["contraction2"].estimator._get_params(),
-        ).values())
-
-        scaled_params = list(self._normalize_flattened_hyperspace(
-            self._expanded["expansion"].estimator._get_params(),
-        ).values())
-
-        scaled_params = list(self._normalize_flattened_hyperspace(
-            self._expanded["midpoint"].estimator._get_params(),
-        ).values())
-
-        scaled_params = list(self._normalize_flattened_hyperspace(
-            self._expanded["shrink"].estimator._get_params(),
-        ).values())
-
         if c1.is_better_than(c2):
             self._expanded["contraction"] = self._expanded["contraction1"]
         else:
