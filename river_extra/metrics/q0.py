@@ -2,12 +2,12 @@ import math
 
 from scipy.special import factorial
 
-from . import base
+from river import metrics
 
 __all__ = ["Q0", "Q2"]
 
 
-class Q0(base.MultiClassMetric):
+class Q0(metrics.base.MultiClassMetric):
     r"""Q0 index.
 
     Dom's Q0 measure [^2] uses conditional entropy to calculate the goodness of

@@ -1,11 +1,11 @@
 import math
 
-from . import base
+from river import metrics
 
 __all__ = ["VariationInfo"]
 
 
-class VariationInfo(base.MultiClassMetric):
+class VariationInfo(metrics.base.MultiClassMetric):
     r"""Variation of Information.
 
     Variation of Information (VI) [^1] [^2] is an information-based clustering measure.

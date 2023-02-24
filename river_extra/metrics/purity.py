@@ -3,7 +3,7 @@ from river import metrics
 __all__ = ["Purity"]
 
 
-class Purity(metrics.MultiClassMetric):
+class Purity(metrics.base.MultiClassMetric):
     r"""Purity.
 
     In a similar fashion with Entropy, the purity of a clustering solution,

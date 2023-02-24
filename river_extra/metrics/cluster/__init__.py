@@ -15,7 +15,6 @@ from .r2 import R2
 from .rmsstd import MSSTD, RMSSTD
 from .sd_validation import SD
 from .separation import Separation
-from .silhouette import Silhouette
 from .ssb import SSB
 from .ssq_based import WB, CalinskiHarabasz, Hartigan
 from .ssw import SSW, BallHall, Cohesion, Xu

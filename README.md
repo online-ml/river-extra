@@ -7,7 +7,7 @@ This package contains additional estimators that have not been put into the main
 ## Installation
 
 ```sh
-pip install river[extra]
+pip install "river[extra]"
 ```
 
 You can also install from source:

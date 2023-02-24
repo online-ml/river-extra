@@ -1,4 +1,6 @@
-class KappaM(base.MultiClassMetric):
+from river import metrics
+
+class KappaM(metrics.base.MultiClassMetric):
     r"""Kappa-M score.
 
     The Kappa-M statistic compares performance with the majority class classifier.
