@@ -59,6 +59,11 @@ class SSPT(base.Estimator):
         self.drift_detector = drift_detector
         self.convergence_sphere = convergence_sphere
 
+        self.vtau=[]
+        self.vdelta=[]
+        self.vgrace=[]
+        self.vscore=[]
+
         self.seed = seed
 
         self._n = 0
@@ -294,6 +299,79 @@ class SSPT(base.Estimator):
         r = self._expanded["reflection"].metric
         c1 = self._expanded["contraction1"].metric
         c2 = self._expanded["contraction2"].metric
+
+        scaled_params = list(self._normalize_flattened_hyperspace(
+            self._simplex[0].estimator._get_params(),
+        ).values())
+        self.vtau.append(scaled_params[0])
+        self.vdelta.append(scaled_params[1])
+        self.vgrace.append(scaled_params[2])
+        self.vscore.append(self._simplex[0].metric.get())
+
+        scaled_params = list(self._normalize_flattened_hyperspace(
+            self._simplex[1].estimator._get_params(),
+        ).values())
+        self.vtau.append(scaled_params[0])
+        self.vdelta.append(scaled_params[1])
+        self.vgrace.append(scaled_params[2])
+        self.vscore.append(self._simplex[1].metric.get())
+
+        scaled_params = list(self._normalize_flattened_hyperspace(
+            self._simplex[2].estimator._get_params(),
+        ).values())
+        self.vtau.append(scaled_params[0])
+        self.vdelta.append(scaled_params[1])
+        self.vgrace.append(scaled_params[2])
+        self.vscore.append(self._simplex[2].metric.get())
+
+        scaled_params = list(self._normalize_flattened_hyperspace(
+            self._expanded["reflection"].estimator._get_params(),
+        ).values())
+        self.vtau.append(scaled_params[0])
+        self.vdelta.append(scaled_params[1])
+        self.vgrace.append(scaled_params[2])
+        self.vscore.append(self._expanded["reflection"].metric.get())
+
+        scaled_params = list(self._normalize_flattened_hyperspace(
+            self._expanded["contraction1"].estimator._get_params(),
+        ).values())
+        self.vtau.append(scaled_params[0])
+        self.vdelta.append(scaled_params[1])
+        self.vgrace.append(scaled_params[2])
+        self.vscore.append(self._expanded["contraction1"].metric.get())
+
+        scaled_params = list(self._normalize_flattened_hyperspace(
+            self._expanded["contraction2"].estimator._get_params(),
+        ).values())
+        self.vtau.append(scaled_params[0])
+        self.vdelta.append(scaled_params[1])
+        self.vgrace.append(scaled_params[2])
+        self.vscore.append(self._expanded["contraction2"].metric.get())
+
+        scaled_params = list(self._normalize_flattened_hyperspace(
+            self._expanded["expansion"].estimator._get_params(),
+        ).values())
+        self.vtau.append(scaled_params[0])
+        self.vdelta.append(scaled_params[1])
+        self.vgrace.append(scaled_params[2])
+        self.vscore.append(self._expanded["expansion"].metric.get())
+
+        scaled_params = list(self._normalize_flattened_hyperspace(
+            self._expanded["midpoint"].estimator._get_params(),
+        ).values())
+        self.vtau.append(scaled_params[0])
+        self.vdelta.append(scaled_params[1])
+        self.vgrace.append(scaled_params[2])
+        self.vscore.append(self._expanded["midpoint"].metric.get())
+
+        scaled_params = list(self._normalize_flattened_hyperspace(
+            self._expanded["shrink"].estimator._get_params(),
+        ).values())
+        self.vtau.append(scaled_params[0])
+        self.vdelta.append(scaled_params[1])
+        self.vgrace.append(scaled_params[2])
+        self.vscore.append(self._expanded["shrink"].metric.get())
+
         if c1.is_better_than(c2):
             self._expanded["contraction"] = self._expanded["contraction1"]
         else:
