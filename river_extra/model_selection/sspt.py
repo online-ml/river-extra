@@ -305,6 +305,7 @@ class SSPT(base.Estimator):
         r = self._expanded["reflection"].metric
         c1 = self._expanded["contraction1"].metric
         c2 = self._expanded["contraction2"].metric
+
         if c1.is_better_than(c2):
             self._expanded["contraction"] = self._expanded["contraction1"]
         else:
