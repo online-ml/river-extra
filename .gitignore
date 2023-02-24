@@ -3,4 +3,3 @@ poetry.lock
 *.whl
 *.tar.gz
 *.pyc
-.DS_Store
