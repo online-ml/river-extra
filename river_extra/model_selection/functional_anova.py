@@ -123,23 +123,6 @@ class Functional_Anova(base.Estimator):
         new_val = round(new_val, 0) if hp_type == int else new_val
         return new_val
 
-    def __combine_bee(self, hp_data, hp_est_1, hp_est_2, func) -> numbers.Number:
-        hp_type, hp_range = hp_data
-        if hp_est_1>=hp_est_2:
-            func=lambda h1, h2: h2 + ((h1 + h2)*9 / 10)
-        else:
-            func = lambda h1, h2: h1 + ((h1 + h2)*9 / 10)
-        new_val = func(hp_est_1, hp_est_2)
-
-        # Range sanity checks
-        if new_val < hp_range[0]:
-            new_val = hp_range[0]
-        if new_val > hp_range[1]:
-            new_val = hp_range[1]
-
-        new_val = round(new_val, 0) if hp_type == int else new_val
-        return new_val
-
     def analyze_fanova(self, cal_df, max_iter=-1):
         metric='score'
         params = list(eval(cal_df.loc[0, 'params']).keys())
