@@ -1,4 +1,7 @@
+<<<<<<< HEAD
 from ast import operator
+=======
+>>>>>>> origin/sspt
 import collections
 import copy
 import math
