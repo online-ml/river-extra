@@ -12,7 +12,6 @@ from river import anomaly, base, compose, drift, metrics, utils
 
 ModelWrapper = collections.namedtuple("ModelWrapper", "estimator metric")
 
-
 class SSPT(base.Estimator):
     """Single-pass Self Parameter Tuning
 
@@ -84,6 +83,7 @@ class SSPT(base.Estimator):
             self._scorer_name = "score_one"
         elif isinstance(border, anomaly.base.AnomalyDetector):
             self._scorer_name = "classify"
+
 
     def __generate(self, hp_data) -> numbers.Number:
         hp_type, hp_range = hp_data
