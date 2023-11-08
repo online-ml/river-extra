@@ -5,3 +5,4 @@ poetry.lock
 *.pyc
 /*.ipynb
 .DS_Store
+/river_extra/model_selection/bandit_g.py
