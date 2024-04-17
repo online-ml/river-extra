@@ -435,7 +435,7 @@ class SSPT(base.Estimator):
             scaled_params_w = self._normalize_flattened_hyperspace(
                 self._simplex[2].estimator._get_params(),
             )
-            print("----------")
+            print("---SPT---")
             print(
                 "B:", list(scaled_params_b.values()), "Score:", self._simplex[0].metric
             )
