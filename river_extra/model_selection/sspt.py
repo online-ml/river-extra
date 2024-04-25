@@ -194,7 +194,7 @@ class SSPT(base.Estimator):
                 sub_hp_prefix = hp_prefix + "__" + sub_hp_name if len(hp_prefix) > 0 else sub_hp_name
             else:
                 sub_hp_prefix = None
-            
+
             config[sub_hp_name] = self._traverse_hps(
                 operation=operation,
                 hp_data=sub_hp_data,
@@ -434,16 +434,6 @@ class SSPT(base.Estimator):
             )
             scaled_params_w = self._normalize_flattened_hyperspace(
                 self._simplex[2].estimator._get_params(),
-            )
-            print("----------")
-            print(
-                "B:", list(scaled_params_b.values()), "Score:", self._simplex[0].metric
-            )
-            print(
-                "G:", list(scaled_params_g.values()), "Score:", self._simplex[1].metric
-            )
-            print(
-                "W:", list(scaled_params_w.values()), "Score:", self._simplex[2].metric
             )
             hyper_points = [
                 list(scaled_params_b.values()),
