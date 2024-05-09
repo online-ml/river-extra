@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "river_extra"
-version = "0.14.0"
+version = "0.21.1"
 description = "Additional estimators for the River package"
 authors = ["MaxHalford <maxhalford25@gmail.com>"]
 license = "BSD-3"
 
 [tool.poetry.dependencies]
-python = ">=3.6.1,<4.0"
-river = "0.14.0"
+python = "<3.13,>=3.9"
+river = "0.21.1"
 
 [tool.poetry.dev-dependencies]
 
