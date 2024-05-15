@@ -14,18 +14,29 @@ ModelWrapper = collections.namedtuple("ModelWrapper", "estimator metric")
 
 
 class SSPT(base.Estimator):
-    """Single-pass Self Parameter Tuning
+    """Single-pass Self Parameter Tuning.
 
     Parameters
     ----------
     estimator
+        The estimator whose hyperparameters are going to be tuned.
     metric
+        Evaluation metric compatible with the underlying learning task. It is
+        used to select the best learning models among the set of candidates.
     params_range
     drift_input
+        Define how the ground truth and the predicted labels are combined to be
+        passed to the concept drift detector. For example, in regression tasks is usual
+        to take the difference between $y$ and $\hat{y}$, whereas in classification
+        a 0-1 loss is commonly used.
     grace_period
+        Define the interval before SSPT checks for convergence and updates the candidate
+        models hyperparameters.
     drift_detector
     convergence_sphere
+
     seed
+        Random seed for reproducibility.
 
     References
     ----------
